@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ID Card OCR — Pipeline Demo (Synthetic Data)</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#14171c; --panel:#1b1f27; --panel-2:#20242e; --border:#2a2f3a;
+    --text:#ecedf0; --text-muted:#9098a8; --vision:#4fd1c5;
+    --radius:10px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg); color:var(--text); font-family:'Inter', sans-serif;
+    padding:40px 20px; display:flex; justify-content:center;
+  }
+  .wrap{max-width:880px; width:100%;}
+  h1{font-family:'Space Grotesk', sans-serif; font-size:22px; font-weight:600; margin-bottom:6px;}
+  .note{color:var(--text-muted); font-size:13.5px; margin-bottom:28px; max-width:560px;}
+  .note strong{color:var(--text); font-weight:500;}
+  .stage-track{display:flex; gap:8px; margin-bottom:28px; flex-wrap:wrap;}
+  .stage-pill{
+    font-family:'JetBrains Mono', monospace; font-size:12px; padding:6px 12px;
+    border-radius:20px; border:1px solid var(--border); color:var(--text-muted);
+    transition:all .2s ease;
+  }
+  .stage-pill.active{border-color:var(--vision); color:var(--vision); background:rgba(79,209,197,0.08);}
+  .stage-pill.done{color:var(--text);}
+  .stage-arrow{color:var(--border); align-self:center; font-size:12px;}
+
+  .layout{display:grid; grid-template-columns:1fr 1fr; gap:24px;}
+  @media (max-width:700px){ .layout{grid-template-columns:1fr;} }
+
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:20px;
+  }
+  .panel h2{font-family:'JetBrains Mono', monospace; font-size:12px; text-transform:uppercase;
+    letter-spacing:0.05em; color:var(--text-muted); margin-bottom:16px; font-weight:400;}
+
+  .card-stage{position:relative; display:flex; align-items:center; justify-content:center; min-height:260px;}
+  .card-svg{transition:transform .6s ease;}
+  .card-svg.rotated{transform:rotate(14deg);}
+  .card-svg.corrected{transform:rotate(0deg);}
+  .box-outline{fill:none; stroke:var(--vision); stroke-width:2; opacity:0; transition:opacity .4s ease;}
+  .box-outline.show{opacity:1;}
+  .field-box{fill:rgba(79,209,197,0.12); stroke:var(--vision); stroke-width:1.2; opacity:0; transition:opacity .3s ease;}
+  .field-box.show{opacity:1;}
+
+  .json-out{
+    font-family:'JetBrains Mono', monospace; font-size:12.5px; line-height:1.9;
+    color:var(--text-muted); white-space:pre-wrap; min-height:220px;
+  }
+  .json-out .key{color:var(--vision);}
+  .json-out .val{color:var(--text); opacity:0; transition:opacity .3s ease;}
+  .json-out .val.show{opacity:1;}
+
+  .controls{display:flex; gap:10px; margin-top:24px;}
+  button{
+    font-family:'JetBrains Mono', monospace; font-size:13px; padding:10px 18px;
+    border-radius:8px; border:1px solid var(--border); background:transparent; color:var(--text);
+    cursor:pointer; transition:border-color .15s ease;
+  }
+  button:hover{border-color:var(--text-muted);}
+  button.primary{background:var(--vision); color:#04342c; border-color:var(--vision); font-weight:500;}
+  button:disabled{opacity:0.4; cursor:default;}
+  .disclaimer{
+    margin-top:20px; font-size:11.5px; color:var(--text-muted); font-family:'JetBrains Mono', monospace;
+    border-top:1px solid var(--border); padding-top:14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ID card OCR — pipeline walkthrough</h1>
+  <p class="note">Interactive walkthrough of the detection &rarr; rotation &rarr; segmentation &rarr; OCR pipeline. <strong>Card shown is a synthetic mock-up with placeholder fields — not a real document or real data.</strong></p>
+
+  <div class="stage-track" id="stageTrack"></div>
+
+  <div class="layout">
+    <div class="panel">
+      <h2>Input / processing</h2>
+      <div class="card-stage">
+        <svg id="cardSvg" class="card-svg" width="260" height="164" viewBox="0 0 260 164">
+          <rect x="0" y="0" width="260" height="164" rx="10" fill="#2a3038" stroke="#3a4150" stroke-width="1"/>
+          <rect x="16" y="16" width="70" height="86" rx="6" fill="#3a4150"/>
+          <text x="51" y="64" text-anchor="middle" font-family="Inter" font-size="9" fill="#6b7280">PHOTO</text>
+          <rect x="100" y="20" width="140" height="10" rx="2" fill="#4a5160" id="f-name"/>
+          <rect x="100" y="40" width="140" height="10" rx="2" fill="#4a5160" id="f-lastname"/>
+          <rect x="100" y="60" width="110" height="10" rx="2" fill="#4a5160" id="f-id"/>
+          <rect x="100" y="80" width="90" height="10" rx="2" fill="#4a5160" id="f-dob"/>
+          <rect x="100" y="100" width="90" height="10" rx="2" fill="#4a5160" id="f-exp"/>
+          <rect class="box-outline" id="detectBox" x="4" y="4" width="252" height="156" rx="10"/>
+          <rect class="field-box" id="box-name" x="97" y="15" width="146" height="20" rx="4"/>
+          <rect class="field-box" id="box-lastname" x="97" y="35" width="146" height="20" rx="4"/>
+          <rect class="field-box" id="box-id" x="97" y="55" width="116" height="20" rx="4"/>
+          <rect class="field-box" id="box-dob" x="97" y="75" width="96" height="20" rx="4"/>
+          <rect class="field-box" id="box-exp" x="97" y="95" width="96" height="20" rx="4"/>
+        </svg>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Extracted output</h2>
+      <div class="json-out" id="jsonOut">{
+  <span class="key">"NAME"</span>: <span class="val" id="v-name">"</span>
+  <span class="key">"LAST_NAME"</span>: <span class="val" id="v-lastname">"</span>
+  <span class="key">"NATIONAL_ID"</span>: <span class="val" id="v-id">"</span>
+  <span class="key">"BIRTH_DATE"</span>: <span class="val" id="v-dob">"</span>
+  <span class="key">"EXPIRE_DATE"</span>: <span class="val" id="v-exp">"</span>
+}</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="runBtn">Run demo</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+
+  <div class="disclaimer">Synthetic example for illustration only. No real personal data, card design, or production model output is used.</div>
+</div>
+
+<script>
+  var stages = ['input', 'detect', 'rotate', 'segment', 'ocr', 'output'];
+  var labels = {input:'input', detect:'detection', rotate:'rotation fix', segment:'segmentation', ocr:'ocr', output:'output'};
+  var track = document.getElementById('stageTrack');
+
+  stages.forEach(function(s, i){
+    var pill = document.createElement('span');
+    pill.className = 'stage-pill';
+    pill.id = 'pill-' + s;
+    pill.textContent = labels[s];
+    track.appendChild(pill);
+    if(i < stages.length - 1){
+      var arrow = document.createElement('span');
+      arrow.className = 'stage-arrow';
+      arrow.textContent = '\u2192';
+      track.appendChild(arrow);
+    }
+  });
+
+  var fieldVals = {
+    'v-name': 'SAMPLE NAME',
+    'v-lastname': 'SAMPLE SURNAME',
+    'v-id': '0000000000',
+    'v-dob': '1370/01/01',
+    'v-exp': '1405/01/01'
+  };
+  var boxIds = ['box-name','box-lastname','box-id','box-dob','box-exp'];
+
+  var cardSvg = document.getElementById('cardSvg');
+  var detectBox = document.getElementById('detectBox');
+  var runBtn = document.getElementById('runBtn');
+  var resetBtn = document.getElementById('resetBtn');
+  var running = false;
+
+  function setActive(stage){
+    stages.forEach(function(s){
+      var el = document.getElementById('pill-' + s);
+      el.classList.remove('active');
+      if(s === stage) el.classList.add('active');
+    });
+  }
+  function markDone(stage){
+    document.getElementById('pill-' + stage).classList.add('done');
+  }
+
+  function reset(){
+    cardSvg.classList.remove('rotated','corrected');
+    detectBox.classList.remove('show');
+    boxIds.forEach(function(id){ document.getElementById(id).classList.remove('show'); });
+    Object.keys(fieldVals).forEach(function(id){
+      var el = document.getElementById(id);
+      el.classList.remove('show');
+      el.textContent = '"';
+    });
+    stages.forEach(function(s){
+      var el = document.getElementById('pill-' + s);
+      el.classList.remove('active','done');
+    });
+    running = false;
+    runBtn.disabled = false;
+  }
+
+  function wait(ms){ return new Promise(function(res){ setTimeout(res, ms); }); }
+
+  async function run(){
+    if(running) return;
+    running = true;
+    runBtn.disabled = true;
+    reset();
+    running = true;
+    runBtn.disabled = true;
+
+    setActive('input');
+    await wait(500);
+    markDone('input');
+
+    setActive('detect');
+    cardSvg.classList.add('rotated');
+    await wait(400);
+    detectBox.classList.add('show');
+    await wait(700);
+    markDone('detect');
+
+    setActive('rotate');
+    cardSvg.classList.remove('rotated');
+    cardSvg.classList.add('corrected');
+    await wait(700);
+    markDone('rotate');
+
+    setActive('segment');
+    for(var i=0;i<boxIds.length;i++){
+      document.getElementById(boxIds[i]).classList.add('show');
+      await wait(180);
+    }
+    await wait(300);
+    markDone('segment');
+
+    setActive('ocr');
+    var keys = Object.keys(fieldVals);
+    for(var j=0;j<keys.length;j++){
+      var el = document.getElementById(keys[j]);
+      el.textContent = fieldVals[keys[j]] + '"';
+      el.classList.add('show');
+      await wait(280);
+    }
+    markDone('ocr');
+
+    setActive('output');
+    await wait(300);
+    markDone('output');
+
+    running = false;
+    runBtn.disabled = false;
+  }
+
+  runBtn.addEventListener('click', run);
+  resetBtn.addEventListener('click', reset);
+</script>
+</body>
+</html>
