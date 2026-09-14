@@ -23,7 +23,7 @@ flowchart LR
     B --> C[Rotation Correction<br/><i>orientation classifier</i>]
     C --> D[Field Segmentation<br/><i>YOLO</i>]
     D --> E[Preprocessing<br/><i>grayscale · threshold</i>]
-    E --> F[OCR Extraction<br/><i>Tesseract, Farsi-tuned</i>]
+    E --> F[OCR Extraction<br/><i>Tesseract</i>]
     F --> G[Structured Output<br/><i>JSON</i>]
 ```
 
